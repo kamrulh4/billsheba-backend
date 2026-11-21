@@ -1,0 +1,27 @@
+[tool.ruff]
+line-length = 110
+target-version = "py313"
+extend-exclude = ["venv", "static", "**/migrations/*"]
+
+[tool.ruff.lint]
+# Correctness + hygiene. Style opinions (docstrings, annotations, ...) are deliberately off.
+select = ["E4", "E7", "E9", "F", "I", "B", "UP", "C4", "PIE", "RUF100"]
+ignore = [
+    "B008",   # DRF/Django use function calls in defaults by design
+    "B904",   # `raise ... from` is noise in serializer validation code
+    "UP042",  # keep TextChoices style used across the project
+    "C408",   # dict(...)/list(...) calls are fine, and read better in test fixtures
+]
+
+[tool.ruff.lint.isort]
+known-first-party = ["app", "common", "core", "customer"]
+
+[tool.coverage.run]
+source = ["core", "customer", "common"]
+omit = [
+    "*/migrations/*", "*/tests/*", "*/tests.py", "manage.py",
+    # one-off scripts used to migrate data out of the original single-client deployment
+    "*/management/commands/import_data.py", "*/management/commands/export_data.py",
+    "*/management/commands/encrypt_router_credentials.py", "*/management/commands/wait_for_db.py",
+    "*/management/commands/fix_payment_bill_amount.py", "*/management/commands/get_customers_from_server.py",
+]
