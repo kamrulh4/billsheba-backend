@@ -93,8 +93,12 @@ def build_preview(org) -> dict:
     packages = set(_package_index(org))
 
     per_profile: dict[str, int] = {}
+    disabled_per_profile: dict[str, int] = {}
     for secret in new:
-        per_profile[secret.get("profile") or "default"] = per_profile.get(secret.get("profile") or "default", 0) + 1
+        key = secret.get("profile") or "default"
+        per_profile[key] = per_profile.get(key, 0) + 1
+        if _is_disabled(secret):
+            disabled_per_profile[key] = disabled_per_profile.get(key, 0) + 1
     known = {p.get("name"): p for p in profiles}
     rows = []
     for name in sorted(set(per_profile) | {p for p in known if p not in BUILTIN_PROFILES}):
@@ -105,6 +109,7 @@ def build_preview(org) -> dict:
                 "rate_limit": rate,
                 "speed_mbps": parse_rate_mbps(rate),
                 "new_customers": per_profile.get(name, 0),
+                "disabled_customers": disabled_per_profile.get(name, 0),
                 "package_exists": name.lower() in packages,
                 "builtin": name in BUILTIN_PROFILES,
             }
@@ -134,10 +139,20 @@ def _price(raw) -> Decimal:
     return value if value >= 0 else Decimal("0")
 
 
-def run_import(org, user, prices: dict | None = None, include_disabled: bool = True) -> dict:
+def run_import(
+    org, user, prices: dict | None = None, include_disabled: bool = True, only_profiles: list[str] | None = None
+) -> dict:
+    """``only_profiles``: import just the users on these router profiles (None = every profile).
+
+    One router often serves several resellers, each with their own profiles, so an ISP must be able to
+    pull in only its own.
+    """
     prices = prices or {}
     profiles, secrets = _read_router(org)
     new, already, other = _classify(org, secrets)
+    if only_profiles is not None:
+        wanted = set(only_profiles)
+        new = [s for s in new if (s.get("profile") or "default") in wanted]
     if not include_disabled:
         new = [s for s in new if not _is_disabled(s)]
 

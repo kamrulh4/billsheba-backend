@@ -98,6 +98,20 @@ class RouterImportTests(Base):
         self.assertEqual(Customer.objects.filter(username="rahim").count(), 1)
         toggle.assert_not_called()  # imported users already exist on the router
 
+    def test_only_the_chosen_profiles_are_imported(self):
+        with self.router():
+            res = self.client.post(URL, {"profiles": ["Home-20M"]}, format="json")
+        self.assertEqual((res.data["customers_created"], res.data["packages_created"]), (1, 1))
+        self.assertEqual(list(Customer.objects.exclude(username="karim").values_list("username", flat=True)), ["fatema"])
+        self.assertFalse(Package.objects.filter(name="Home-10M").exists())
+
+    def test_no_chosen_profile_imports_nothing_and_bad_input_is_rejected(self):
+        with self.router():
+            none = self.client.post(URL, {"profiles": []}, format="json")
+            bad = self.client.post(URL, {"profiles": "Home-20M"}, format="json")
+        self.assertEqual(none.data["customers_created"], 0)
+        self.assertEqual(bad.status_code, 400)
+
     def test_can_skip_disabled_users(self):
         with self.router():
             res = self.client.post(URL, {"include_disabled": False}, format="json")

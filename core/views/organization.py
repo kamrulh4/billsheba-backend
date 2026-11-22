@@ -255,8 +255,15 @@ class RouterImport(APIView):
         prices = request.data.get("prices") or {}
         if not isinstance(prices, dict):
             return Response({"message": "prices must be an object of profile -> price."}, status=400)
+        only_profiles = request.data.get("profiles")
+        if only_profiles is not None and (
+            not isinstance(only_profiles, list) or not all(isinstance(p, str) for p in only_profiles)
+        ):
+            return Response({"message": "profiles must be a list of profile names."}, status=400)
         try:
-            result = run_import(org, request.user, prices, bool(request.data.get("include_disabled", True)))
+            result = run_import(
+                org, request.user, prices, bool(request.data.get("include_disabled", True)), only_profiles
+            )
         except RouterImportError as e:
             return Response({"message": str(e)}, status=status.HTTP_400_BAD_REQUEST)
         audit(request, "router.import", f"org:{org.pk}",
