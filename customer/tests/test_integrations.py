@@ -140,8 +140,10 @@ class SmsGatewayTests(SimpleTestCase):
         post.assert_not_called()
 
     def test_single_and_bulk_success_and_failure(self):
-        ok = mock.Mock(status_code=202, text="")
+        # the real gateway: HTTP 200, "accepted" is response_code 202 inside the body
+        ok = mock.Mock(status_code=200, text="")
         ok.raise_for_status.return_value = None
+        ok.json.return_value = {"response_code": 202, "success_message": "SMS Submitted Successfully 1"}
         with mock.patch.object(sms_helper, "SMS_API_KEY", "key"), mock.patch(
             "common.helpers.sms_helper.requests.post", return_value=ok
         ) as post:
@@ -151,10 +153,11 @@ class SmsGatewayTests(SimpleTestCase):
             self.assertTrue(sms_helper.SMS.send_bulk_sms([{"to": "8801711000001", "message": "m"}]))
         rejected = mock.Mock(status_code=200, text="rejected")
         rejected.raise_for_status.return_value = None
+        rejected.json.return_value = {"response_code": 1007, "error_message": "Balance Insufficient"}
         with mock.patch.object(sms_helper, "SMS_API_KEY", "key"), mock.patch(
             "common.helpers.sms_helper.requests.post", return_value=rejected
         ):
-            self.assertFalse(sms_helper.SMS.send_single_sms("8801711000001", "x"))  # single must be 202
+            self.assertFalse(sms_helper.SMS.send_single_sms("8801711000001", "x"))  # refused inside a 200
         with mock.patch.object(sms_helper, "SMS_API_KEY", "key"), mock.patch(
             "common.helpers.sms_helper.requests.post", side_effect=requests.RequestException("down")
         ):
