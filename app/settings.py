@@ -65,6 +65,8 @@ PLATFORM_BKASH_NUMBER = os.environ.get("PLATFORM_BKASH_NUMBER", "")
 PLATFORM_NAGAD_NUMBER = os.environ.get("PLATFORM_NAGAD_NUMBER", "")
 PLATFORM_ROCKET_NUMBER = os.environ.get("PLATFORM_ROCKET_NUMBER", "")
 # Platform's own bKash *merchant* credentials: ISP subscription fees are paid online into this account.
+# Shared secret the scheduler sends (X-Cron-Secret) to start the platform-wide billing jobs. Empty = disabled.
+CRON_SECRET = os.environ.get("CRON_SECRET", "")
 PLATFORM_BKASH_APP_KEY = os.environ.get("PLATFORM_BKASH_APP_KEY", "")
 PLATFORM_BKASH_APP_SECRET = os.environ.get("PLATFORM_BKASH_APP_SECRET", "")
 PLATFORM_BKASH_USERNAME = os.environ.get("PLATFORM_BKASH_USERNAME", "")

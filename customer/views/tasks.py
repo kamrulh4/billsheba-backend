@@ -4,21 +4,29 @@ Per-organization actions are queued on Celery (falling back to running inline wh
 reachable). Platform-wide actions are always queued and restricted to the platform owner.
 """
 
+import logging
+
+from django.conf import settings
 from rest_framework import status
 from rest_framework.response import Response
 from rest_framework.views import APIView
 
-from core.permissions import HasActiveSubscription, IsAdminUser, IsManager, IsSuperAdmin
+from core.permissions import HasActiveSubscription, HasCronSecret, IsAdminUser, IsManager, IsSuperAdmin
 from customer.services import billing
 from customer.services.jobs import run_in_background
 from customer.tasks import (
     daily_billing_cycle,
+    deactivate_all_organizations_expired_subscription_customers,
     deactivate_due_payment_customers,
     deactivate_expired_subscription_customers,
     deactivate_organizations_due_payment_customers,
     generate_customer_bills,
     generate_organizations_bills,
+    reconcile_payments,
 )
+
+
+logger = logging.getLogger(__name__)
 
 
 class _OrgJob(APIView):
@@ -72,12 +80,19 @@ class DeactiveExpiredSubscriptionCustomer(_OrgJob):
 
 
 class _PlatformJob(APIView):
-    permission_classes = [IsSuperAdmin]
+    """Runs for every ISP. Called by the platform owner, or by the scheduler with the ``X-Cron-Secret`` header."""
+
+    permission_classes = [IsSuperAdmin | HasCronSecret]
     task = None
 
     def get(self, request, *args, **kwargs):
-        self.task.delay()
-        return Response({"message": "Background task started!"})
+        if settings.BILLING_JOBS_IN_BACKGROUND:
+            try:
+                self.task.apply_async(retry=False)  # fail fast when Redis is down
+                return Response({"message": "Background task started!", "queued": True})
+            except Exception:
+                logger.warning("Celery is not reachable, running %s now", self.task.name, exc_info=True)
+        return Response({"message": "Task finished.", "queued": False, "result": self.task()})
 
 
 class GenerateOrganizationsBillTask(_PlatformJob):
@@ -90,3 +105,11 @@ class DeactiveOrganizationsDueCustomer(_PlatformJob):
 
 class DailyCycleTask(_PlatformJob):
     task = daily_billing_cycle
+
+
+class DeactiveOrganizationsExpiredCustomer(_PlatformJob):
+    task = deactivate_all_organizations_expired_subscription_customers
+
+
+class ReconcilePaymentsTask(_PlatformJob):
+    task = reconcile_payments

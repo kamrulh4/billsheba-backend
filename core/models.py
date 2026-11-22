@@ -147,14 +147,24 @@ class Organization(NameDescriptionBaseModel):
             return self.subscription.max_customers
         return 50
 
+    # A free trial gets only a taste of SMS: every message is billed to the platform.
+    TRIAL_SMS_LIMIT = 50
+
     @property
     def sms_monthly_limit(self) -> int:
-        """SMS segments this ISP may send per month: 0 when SMS is off, else override, else the plan's."""
+        """SMS segments this ISP may send per month: 0 when SMS is off, else override, else the plan's.
+
+        While on the free trial the limit is capped at ``TRIAL_SMS_LIMIT`` whatever the plan says.
+        """
         if not self.sms_feature:
             return 0
         if self.sms_quota_override:
-            return self.sms_quota_override
-        return self.subscription.sms_monthly_quota if self.subscription_id else 0
+            limit = self.sms_quota_override
+        else:
+            limit = self.subscription.sms_monthly_quota if self.subscription_id else 0
+        if self.subscription_status == SubscriptionStatus.TRIAL:
+            return min(limit, self.TRIAL_SMS_LIMIT)
+        return limit
 
     def is_subscription_active(self) -> bool:
         """True while the trial or a paid period has not ended."""

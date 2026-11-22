@@ -5,7 +5,7 @@ from unittest import mock
 from django.test import SimpleTestCase
 
 from common.sms_text import sms_info, sms_segments
-from core.models import Organization
+from core.models import Organization, Subscription
 from customer.choices import SMSStatus
 from customer.models import SMSLog
 from customer.services import sms as sms_service
@@ -70,7 +70,16 @@ class LimitTests(Base):
         self.assertEqual(log.sms_status, SMSStatus.SENT)
         self.assertEqual(sms_service.sms_used(self.org), 0)
 
+    def test_a_free_trial_only_gets_a_taste_of_sms(self):
+        self.org.sms_quota_override = 0
+        self.org.subscription.sms_monthly_quota = 500
+        self.org.subscription_status = "TRIAL"
+        self.assertEqual(self.org.sms_monthly_limit, Organization.TRIAL_SMS_LIMIT)
+        self.org.subscription_status = "ACTIVE"
+        self.assertEqual(self.org.sms_monthly_limit, 500)
+
     def test_plan_quota_applies_unless_overridden(self):
+        self.org.subscription_status = "ACTIVE"
         self.org.sms_quota_override = 0
         self.org.subscription.sms_monthly_quota = 300
         self.assertEqual(self.org.sms_monthly_limit, 300)
@@ -116,6 +125,7 @@ class TemplateAndBulkTests(Base):
 
     def test_bulk_over_the_limit_sends_nothing(self):
         Organization.objects.update(sms_quota_override=0)
+        Subscription.objects.update(sms_monthly_quota=0)
         with mock.patch(SEND, return_value=True) as gateway:
             res = self.client.post(f"{API}/sms/send", {"message": "ক" * 60}, format="json")
         self.assertEqual(res.status_code, 400)

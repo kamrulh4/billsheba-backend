@@ -22,7 +22,7 @@ from common.bkash import BkashClient, BkashError
 from common.choices import Status
 from common.sms_text import sms_segments
 from core.audit import audit
-from core.models import Organization
+from core.models import Organization, User
 from core.permissions import (
     AllowAny,
     HasActiveSubscription,
@@ -30,10 +30,11 @@ from core.permissions import (
     IsManager,
     IsStaff,
 )
-from customer.choices import ComplaintStatus, OnlinePaymentStatus, PaymentRequestStatus, SMSStatus
+from customer.choices import ComplaintStatus, PaymentMethod, OnlinePaymentStatus, PaymentRequestStatus, SMSStatus
 from customer.models import (
     Complaint,
     Customer,
+    Deposit,
     Expense,
     OnlinePayment,
     Package,
@@ -45,6 +46,7 @@ from customer.serializers.package import PackageBase
 from customer.serializers.payment import PaymentListSerializer
 from customer.serializers.saas import (
     ComplaintSerializer,
+    DepositSerializer,
     ExpenseSerializer,
     PaymentRequestSerializer,
     PortalComplaintSerializer,
@@ -98,6 +100,128 @@ class ExpenseDetail(RetrieveUpdateDestroyAPIView):
     def perform_destroy(self, instance):
         instance.status = Status.REMOVED
         instance.save(update_fields=["status"])
+
+
+# ---- collections & deposits ---------------------------------------------------
+def _date_param(request, name, default):
+    from datetime import date
+
+    raw = request.query_params.get(name)
+    try:
+        return date.fromisoformat(raw) if raw else default
+    except ValueError:
+        raise ValidationError({name: "Use a date like 2026-11-30."}) from None
+
+
+class CollectionSummary(APIView):
+    """Per collector for a date range: cash collected, cash handed over, and what is still with them.
+
+    Balance-based: ``pending = collected - deposited`` in the range, so pick the date you started tracking
+    as ``start_date`` to carry earlier balances along. Staff only see their own line.
+    """
+
+    permission_classes = [STAFF_PLUS]
+
+    def get(self, request):
+        from datetime import timedelta
+
+        from customer.views.payment import day_start
+
+        org_id = _org_id(request)
+        today = timezone.localdate()
+        start = _date_param(request, "start_date", today.replace(day=1))
+        end = _date_param(request, "end_date", today)
+        collected_by = {
+            r["entry_by_id"]: r
+            for r in Payment.objects.filter(
+                organization_id=org_id, paid=True, amount__gt=0, payment_method=PaymentMethod.CASH,
+                entry_by__isnull=False, status=Status.ACTIVE,
+                payment_date__gte=day_start(start), payment_date__lt=day_start(end + timedelta(days=1)),
+            ).values("entry_by_id").annotate(total=Sum("amount"), count=Count("id"))
+        }
+        deposited_by = {
+            r["collector_id"]: r["total"]
+            for r in Deposit.objects.filter(
+                organization_id=org_id, status=Status.ACTIVE, deposit_date__gte=start, deposit_date__lte=end
+            ).values("collector_id").annotate(total=Sum("amount"))
+        }
+        ids = set(collected_by) | set(deposited_by)
+        if not (request.user.kind in ("ADMIN", "MANAGER", "SUPER_ADMIN")):
+            ids &= {request.user.pk}
+        users = {u.pk: u for u in User.objects.filter(pk__in=ids)}
+        rows = []
+        for pk in ids:
+            collected = (collected_by.get(pk) or {}).get("total") or Decimal("0")
+            deposited = deposited_by.get(pk) or Decimal("0")
+            user = users[pk]
+            rows.append({
+                "collector_id": pk,
+                "name": f"{user.first_name} {user.last_name}".strip() or user.phone,
+                "payments": (collected_by.get(pk) or {}).get("count") or 0,
+                "collected": collected,
+                "deposited": deposited,
+                "pending": collected - deposited,
+            })
+        rows.sort(key=lambda r: -r["pending"])
+        return Response({
+            "start_date": start, "end_date": end, "rows": rows,
+            "total_collected": sum((r["collected"] for r in rows), Decimal("0")),
+            "total_deposited": sum((r["deposited"] for r in rows), Decimal("0")),
+            "total_pending": sum((r["pending"] for r in rows), Decimal("0")),
+        })
+
+
+class DepositList(ListCreateAPIView):
+    serializer_class = DepositSerializer
+
+    def get_permissions(self):
+        if self.request.method == "POST":
+            return [(ADMIN_MANAGER & HasActiveSubscription)()]
+        return [STAFF_PLUS()]
+
+    def get_queryset(self):
+        user = self.request.user
+        qs = Deposit.objects.filter(organization_id=user.organization_id, status=Status.ACTIVE).select_related(
+            "collector", "received_by"
+        )
+        if user.kind not in ("ADMIN", "MANAGER", "SUPER_ADMIN"):
+            qs = qs.filter(collector=user)
+        p = self.request.query_params
+        if p.get("collector_id"):
+            qs = qs.filter(collector_id=p["collector_id"])
+        if p.get("start_date"):
+            qs = qs.filter(deposit_date__gte=p["start_date"])
+        if p.get("end_date"):
+            qs = qs.filter(deposit_date__lte=p["end_date"])
+        return qs
+
+    def perform_create(self, serializer):
+        user = self.request.user
+        collector = User.objects.filter(
+            pk=serializer.validated_data.pop("collector_id"), organization_id=user.organization_id
+        ).first()
+        if not collector:
+            raise ValidationError({"collector_id": "Collector not found."})
+        deposit = serializer.save(organization_id=user.organization_id, collector=collector, received_by=user)
+        audit(self.request, "deposit.create", f"deposit:{deposit.pk}",
+              f"{collector.first_name} handed over ৳{deposit.amount} on {deposit.deposit_date}")
+
+
+class DepositDetail(APIView):
+    """DELETE a wrongly entered deposit (kept in the table as REMOVED, and in the activity log)."""
+
+    permission_classes = [ADMIN_MANAGER & HasActiveSubscription]
+
+    def delete(self, request, uid):
+        deposit = Deposit.objects.filter(
+            uid=uid, organization_id=_org_id(request), status=Status.ACTIVE
+        ).first()
+        if not deposit:
+            return Response({"message": "Deposit not found."}, status=404)
+        deposit.status = Status.REMOVED
+        deposit.save(update_fields=["status"])
+        audit(request, "deposit.delete", f"deposit:{deposit.pk}", f"removed ৳{deposit.amount}")
+        return Response(status=204)
 
 
 # ---- complaints -------------------------------------------------------------

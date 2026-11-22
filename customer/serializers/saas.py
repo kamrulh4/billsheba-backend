@@ -3,7 +3,7 @@
 from rest_framework import serializers
 
 from common.bd import normalize_bd_phone
-from customer.models import Complaint, Expense, PaymentRequest, SMSLog
+from customer.models import Complaint, Deposit, Expense, PaymentRequest, SMSLog
 
 
 class ExpenseSerializer(serializers.ModelSerializer):
@@ -86,3 +86,32 @@ class PortalPaySerializer(PortalLookupSerializer):
 class PortalComplaintSerializer(PortalLookupSerializer):
     subject = serializers.CharField(max_length=255)
     description = serializers.CharField(required=False, allow_blank=True, max_length=2000)
+
+
+class DepositSerializer(serializers.ModelSerializer):
+    collector_name = serializers.SerializerMethodField()
+    received_by_name = serializers.SerializerMethodField()
+    collector_id = serializers.IntegerField()
+
+    class Meta:
+        model = Deposit
+        fields = (
+            "id", "uid", "collector_id", "collector_name", "amount", "deposit_date", "note",
+            "received_by_name", "created_at",
+        )
+        read_only_fields = ("id", "uid", "created_at")
+
+    @staticmethod
+    def _name(user):
+        return f"{user.first_name} {user.last_name}".strip() if user else None
+
+    def get_collector_name(self, obj):
+        return self._name(obj.collector)
+
+    def get_received_by_name(self, obj):
+        return self._name(obj.received_by)
+
+    def validate_amount(self, value):
+        if value <= 0:
+            raise serializers.ValidationError("Amount must be greater than zero.")
+        return value

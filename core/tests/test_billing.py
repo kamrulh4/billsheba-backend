@@ -45,12 +45,12 @@ class SubscriptionRenewalTests(APITestCase):
 
         info = self.client.get(f"{API}/billing").data
         self.assertEqual(info["current"]["status"], "TRIAL")
-        self.assertEqual(len(info["plans"]), 3)  # paid plans only
+        self.assertEqual(len(info["plans"]), 3)  # the three public paid plans
 
         body = {"plan_id": premium.id, "months": 2, "payment_method": "BKASH", "transaction_id": "tx123abc"}
         self.assertEqual(self.client.post(f"{API}/billing/renew", body, format="json").status_code, 201)
         self.assertEqual(self.client.post(f"{API}/billing/renew", body, format="json").status_code, 400)  # duplicate trx
-        free = Subscription.objects.get(name="Starter")
+        free = Subscription.objects.create(name="Free", plan="FREE", price=0, max_customers=10)
         bad = dict(body, plan_id=free.id, transaction_id="other")
         self.assertEqual(self.client.post(f"{API}/billing/renew", bad, format="json").status_code, 400)
 

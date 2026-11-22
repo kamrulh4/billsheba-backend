@@ -1,3 +1,6 @@
+import hmac
+
+from django.conf import settings
 from rest_framework.permissions import SAFE_METHODS, BasePermission
 from rest_framework.request import Request
 
@@ -12,6 +15,18 @@ class AllowAny(BasePermission):
 class IsAuthenticated(BasePermission):
     def has_permission(self, request: Request, view) -> bool:
         return request.user and request.user.is_authenticated
+
+
+class HasCronSecret(BasePermission):
+    """The scheduler (Coolify cron) proves itself with the ``X-Cron-Secret`` header = ``CRON_SECRET``.
+
+    With no ``CRON_SECRET`` configured this never passes, so the platform-wide jobs stay closed by default.
+    """
+
+    def has_permission(self, request: Request, view) -> bool:
+        secret = settings.CRON_SECRET
+        sent = request.headers.get("X-Cron-Secret", "")
+        return bool(secret) and hmac.compare_digest(sent.encode(), secret.encode())
 
 
 ADMIN_KINDS = (UserKind.ADMIN, UserKind.OWNER, UserKind.SUPER_ADMIN)

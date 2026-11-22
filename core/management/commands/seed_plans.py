@@ -5,15 +5,24 @@ from django.core.management.base import BaseCommand
 from core.choices import SubscriptionType
 from core.models import Subscription
 
+# Three public plans, priced by how many customers the ISP manages. The SMS quota is what keeps a plan's
+# cost bounded (every SMS is billed to us), so it grows with the plan. The 14-day free trial runs on the
+# smallest plan, with its SMS capped (see Organization.TRIAL_SMS_LIMIT).
 PLANS = [
-    dict(name="Starter", plan=SubscriptionType.FREE, price=0, max_customers=50, max_users=2, trial_days=14,
-         sms_feature=False, features=["৫০ জন গ্রাহক পর্যন্ত", "মাসিক বিল জেনারেশন", "পেমেন্ট ট্র্যাকিং", "১৪ দিন ফ্রি ট্রায়াল"]),
-    dict(name="Basic", plan=SubscriptionType.BASIC, price=500, max_customers=300, max_users=5, trial_days=0,
-         sms_feature=True, sms_monthly_quota=300, features=["৩০০ জন গ্রাহক পর্যন্ত", "MikroTik অটো সংযোগ বন্ধ/চালু", "এসএমএস নোটিফিকেশন", "রিপোর্ট ও খরচ হিসাব"]),
-    dict(name="Premium", plan=SubscriptionType.PREMIUM, price=1200, max_customers=1500, max_users=15, trial_days=0,
-         sms_feature=True, sms_monthly_quota=1500, features=["১৫০০ জন গ্রাহক পর্যন্ত", "কাস্টমার পোর্টাল (bKash/Nagad)", "অভিযোগ ব্যবস্থাপনা", "অগ্রাধিকার সাপোর্ট"]),
-    dict(name="Enterprise", plan=SubscriptionType.ENTERPRISE, price=3000, max_customers=10000, max_users=50, trial_days=0,
-         sms_feature=True, sms_monthly_quota=5000, features=["১০,০০০ গ্রাহক পর্যন্ত", "সব ফিচার", "ডেডিকেটেড সাপোর্ট"]),
+    dict(name="Basic", plan=SubscriptionType.BASIC, price=1000, max_customers=200, max_users=5, trial_days=14,
+         sms_feature=True, sms_monthly_quota=500, is_public=True,
+         features=["২০০ জন গ্রাহক পর্যন্ত", "মাসে ৫০০ এসএমএস", "MikroTik অটো সংযোগ বন্ধ/চালু", "রিপোর্ট ও খরচ হিসাব", "১৪ দিন ফ্রি ট্রায়াল"]),
+    dict(name="Standard", plan=SubscriptionType.STANDARD, price=2000, max_customers=500, max_users=10, trial_days=0,
+         sms_feature=True, sms_monthly_quota=1250, is_public=True,
+         features=["৫০০ জন গ্রাহক পর্যন্ত", "মাসে ১২৫০ এসএমএস", "কাস্টমার পোর্টাল (bKash/Nagad)", "অভিযোগ ব্যবস্থাপনা"]),
+    dict(name="Premium", plan=SubscriptionType.PREMIUM, price=3000, max_customers=1000, max_users=20, trial_days=0,
+         sms_feature=True, sms_monthly_quota=2500, is_public=True,
+         features=["১০০০ জন গ্রাহক পর্যন্ত", "মাসে ২৫০০ এসএমএস", "সব ফিচার", "অগ্রাধিকার সাপোর্ট"]),
+    # Not shown to the public. The platform owner puts a big ISP on it and sets that ISP's own customer limit
+    # (allowed_customer) and SMS limit (sms_quota_override) on the organization; the price is agreed one by one.
+    dict(name="Custom", plan=SubscriptionType.ENTERPRISE, price=0, max_customers=5000, max_users=50, trial_days=0,
+         sms_feature=True, sms_monthly_quota=5000, is_public=False,
+         features=["আলাদা চুক্তি অনুযায়ী গ্রাহক ও এসএমএস সীমা"]),
 ]
 
 
@@ -34,3 +43,8 @@ class Command(BaseCommand):
         for data in PLANS:
             _, created = Subscription.objects.update_or_create(name=data["name"], defaults=data)
             self.stdout.write(f"{'created' if created else 'updated'}: {data['name']}")
+        # Older plans stay in the database (ISPs may still be on them) but are no longer offered.
+        hidden = Subscription.objects.exclude(name__in=[p["name"] for p in PLANS]).filter(is_public=True)
+        for plan in hidden:
+            self.stdout.write(f"hidden from the pricing page: {plan.name}")
+        hidden.update(is_public=False)

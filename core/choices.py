@@ -4,6 +4,7 @@ from django.db.models import TextChoices
 class SubscriptionType(TextChoices):
     FREE = "FREE", "Free"
     BASIC = "BASIC", "Basic"
+    STANDARD = "STANDARD", "Standard"
     PREMIUM = "PREMIUM", "Premium"
     ENTERPRISE = "ENTERPRISE", "Enterprise"
 

@@ -8,7 +8,7 @@ from django.db.models.signals import pre_save
 from django.dispatch import receiver
 from django.utils import timezone
 
-from common.models import NameDescriptionBaseModel
+from common.models import BaseModelWithUID, NameDescriptionBaseModel
 from customer.choices import (
     ComplaintPriority,
     ComplaintStatus,
@@ -254,6 +254,30 @@ class Expense(NameDescriptionBaseModel):
         verbose_name = "Expense"
         verbose_name_plural = "Expenses"
         ordering = ["-expense_date", "-pk"]
+
+
+class Deposit(BaseModelWithUID):
+    """Cash a collector handed over to the ISP (balance-based: it is not tied to single payments)."""
+
+    organization = models.ForeignKey(
+        "core.Organization", on_delete=models.CASCADE, related_name="deposits"
+    )
+    collector = models.ForeignKey(
+        "core.User", on_delete=models.CASCADE, related_name="deposits_made"
+    )
+    amount = models.DecimalField(max_digits=12, decimal_places=2)
+    deposit_date = models.DateField(default=timezone.localdate, db_index=True)
+    note = models.CharField(max_length=255, blank=True, default="")
+    received_by = models.ForeignKey(
+        "core.User", on_delete=models.SET_NULL, null=True, blank=True, related_name="deposits_received"
+    )
+
+    def __str__(self):
+        return f"{self.collector_id} deposited {self.amount}"
+
+    class Meta:
+        ordering = ["-deposit_date", "-pk"]
+        indexes = [models.Index(fields=["organization", "collector", "deposit_date"])]
 
 
 class Complaint(NameDescriptionBaseModel):

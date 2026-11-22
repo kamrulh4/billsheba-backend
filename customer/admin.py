@@ -4,6 +4,7 @@ from unfold.admin import ModelAdmin
 from customer.models import (
     Complaint,
     Customer,
+    Deposit,
     Expense,
     OnlinePayment,
     Package,
@@ -72,3 +73,12 @@ class OnlinePaymentAdmin(ModelAdmin):
 
 
 admin.site.register(OnlinePayment, OnlinePaymentAdmin)
+
+
+class DepositAdmin(ModelAdmin):
+    list_display = ("id", "organization", "collector", "amount", "deposit_date", "status")
+    list_filter = ("status",)
+    search_fields = ("collector__first_name", "collector__phone")
+
+
+admin.site.register(Deposit, DepositAdmin)

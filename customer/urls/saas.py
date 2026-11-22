@@ -5,6 +5,9 @@ from customer.views import saas
 urlpatterns = [
     path("/expenses", saas.ExpenseList.as_view(), name="expense-list"),
     path("/expenses/<uuid:uid>", saas.ExpenseDetail.as_view(), name="expense-detail"),
+    path("/collections/summary", saas.CollectionSummary.as_view(), name="collection-summary"),
+    path("/collections/deposits", saas.DepositList.as_view(), name="deposit-list"),
+    path("/collections/deposits/<uuid:uid>", saas.DepositDetail.as_view(), name="deposit-detail"),
     path("/complaints", saas.ComplaintList.as_view(), name="complaint-list"),
     path("/complaints/<uuid:uid>", saas.ComplaintDetail.as_view(), name="complaint-detail"),
     path("/payment-requests", saas.PaymentRequestList.as_view(), name="payment-request-list"),

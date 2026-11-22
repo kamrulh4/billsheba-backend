@@ -283,7 +283,8 @@ class SubscriptionReconciliationTests(Base):
         token = mock.Mock(status_code=200)
         token.json.return_value = {"id_token": "t"}
         result = mock.Mock(status_code=200)
-        result.json.return_value = {"transactionStatus": status, "trxID": "TRXSUB1", "amount": "500.00"}
+        result.json.return_value = {"transactionStatus": status, "trxID": "TRXSUB1",
+                                  "amount": f"{Subscription.objects.get(name='Basic').price:.2f}"}
         post = lambda url, **kw: token if url.endswith("/token/grant") else result  # noqa: E731
         with override_settings(**self.PLATFORM), mock.patch("common.bkash.requests.post", side_effect=post):
             return reconcile_subscription_payments()
@@ -356,6 +357,8 @@ class QueryEfficiencyTests(Base):
         self.assertFalse(any("DISTINCT" in q["sql"].upper() and "billing_month" in q["sql"] for q in ctx.captured_queries))
 
     def test_bulk_suspension_uses_constant_queries(self):
+        Organization.objects.update(sms_feature=False)  # SMS per customer is not what is measured here
+        self.org.refresh_from_db()
         self.make_customers(40)
         few = self.count_queries(lambda: billing.suspend_overdue(self.org))
         Customer.objects.update(is_active=True)

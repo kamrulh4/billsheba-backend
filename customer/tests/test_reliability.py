@@ -140,7 +140,7 @@ class RouterRetryTests(Base):
 
 class ReminderTests(Base):
     def test_reminder_sent_once_per_day_on_due_day(self):
-        billing.generate_bills(self.org)
+        billing.generate_bills(self.org, send_sms=False)
         Organization.objects.update(sms_feature=True, sms_quota_override=1000, due_day=timezone.localdate().day)
         org = Organization.objects.get()
         with mock.patch("customer.services.sms.SMS.send_single_sms", return_value=True) as sms:

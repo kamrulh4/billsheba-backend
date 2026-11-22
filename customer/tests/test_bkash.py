@@ -212,7 +212,7 @@ class BkashTests(BkashBase):
         with mock.patch("common.bkash.requests.post", fake):
             res = self.client.post(f"{API}/billing/renew/bkash", {"plan_id": premium.id, "months": 2}, format="json")
             self.assertEqual(res.status_code, 200, res.content)
-            self.assertEqual(fake.created_amount, "2400.00")
+            self.assertEqual(fake.created_amount, f"{premium.price * 2:.2f}")
             self.assertEqual(fake.headers_for("/checkout/create")[0]["X-APP-Key"], "plat-key")
 
             sp = SubscriptionPayment.objects.get()
