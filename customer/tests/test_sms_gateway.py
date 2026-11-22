@@ -36,9 +36,12 @@ class GatewayReplyTests(SimpleTestCase):
             self.assertFalse(self.send(refused), code)
             self.assertFalse(self.send(refused, bulk=True), code)
 
-    def test_a_non_json_reply_counts_only_with_http_202(self):
-        self.assertTrue(self.send(reply(202)))
+    def test_a_reply_without_response_code_falls_back_to_the_http_status(self):
+        self.assertTrue(self.send(reply(202)))  # the old single-SMS rule still works
         self.assertFalse(self.send(reply(200)))
+        self.assertTrue(self.send(reply(200), bulk=True))  # bulk accepted plain 200 or 202 before
+        self.assertTrue(self.send(reply(202, {"status": "ok"}), bulk=True))
+        self.assertFalse(self.send(reply(500), bulk=True))
 
     def test_without_an_api_key_nothing_is_sent(self):
         with mock.patch("common.helpers.sms_helper.requests.post") as post:

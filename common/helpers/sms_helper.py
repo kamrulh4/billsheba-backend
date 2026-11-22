@@ -12,12 +12,12 @@ SMS_API_KEY: str = settings.SMS_API_KEY
 SMS_SENDER_ID: str = settings.SMS_SENDER_ID
 
 
-def _accepted(response) -> bool:
+def _accepted(response, plain_ok=(202,)) -> bool:
     """Did the gateway accept the message(s)?
 
     BulkSMSBD answers HTTP 200 with ``{"response_code": 202, "success_message": "SMS Submitted Successfully"}``;
     any other ``response_code`` (invalid number, no balance, bad key...) is a refusal even though the HTTP
-    status is 200. A reply that is not JSON counts only when the HTTP status itself is 202.
+    status is 200. A reply with no ``response_code`` counts when its HTTP status is in ``plain_ok``.
     """
     try:
         code = response.json().get("response_code")
@@ -28,7 +28,7 @@ def _accepted(response) -> bool:
             return int(code) == 202
         except (TypeError, ValueError):
             return False
-    return response.status_code == 202
+    return response.status_code in plain_ok
 
 
 class SMS:
@@ -82,7 +82,7 @@ class SMS:
         try:
             response = requests.post(url, data=body, timeout=60)
             response.raise_for_status()
-            if not _accepted(response):
+            if not _accepted(response, plain_ok=(200, 202)):
                 print(f"Failed to send SMS, {response.text}")
                 return False
             return True
