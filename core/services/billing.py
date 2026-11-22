@@ -103,15 +103,14 @@ REMINDER_DAYS = (7, 3, 1)
 
 def send_subscription_reminders() -> dict:
     """SMS an ISP's contact number 7, 3 and 1 day(s) before its trial / plan ends."""
-    from customer.models import SMSLog
-    from customer.services.sms import _deliver  # shared sender (logs + never raises)
+    from customer.services.sms import _deliver  # shared sender (never raises)
 
     today = timezone.localdate()
     sent = 0
     orgs = Organization.objects.filter(
         subscription_status__in=[SubscriptionStatus.TRIAL, SubscriptionStatus.ACTIVE],
         subscription_end_date__in=[today + _td(days=d) for d in REMINDER_DAYS],
-    ).exclude(phone="")
+    ).exclude(phone="").exclude(expiry_reminder_sent_on=today)  # at most one reminder a day per ISP
     for org in orgs:
         days = (org.subscription_end_date - today).days
         kind = "ট্রায়াল" if org.subscription_status == SubscriptionStatus.TRIAL else "সাবস্ক্রিপশন"
@@ -119,8 +118,7 @@ def send_subscription_reminders() -> dict:
             f"{org.name}: আপনার বিলশেবা {kind} {days} দিনে শেষ হবে। "
             f"চালু রাখতে {settings.PUBLIC_BASE_URL}/billing এ রিনিউ করুন।"
         )
-        if SMSLog.objects.filter(organization=org, customer__isnull=True, message=message, created_at__date=today).exists():
-            continue
         _deliver(org, None, org.phone, message, billable=False)  # a platform notice, not the ISP's quota
+        Organization.objects.filter(pk=org.pk).update(expiry_reminder_sent_on=today)
         sent += 1
     return {"sent": sent}

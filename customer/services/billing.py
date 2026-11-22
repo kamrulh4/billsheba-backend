@@ -142,14 +142,13 @@ def send_due_reminders(org) -> dict:
     """SMS unpaid customers on the ISP's suspension day (and, if enabled, N days earlier). Once per day."""
     from django.conf import settings
 
-    from customer.models import SMSLog
-    from customer.services.sms import render_message
-
     today = timezone.localdate()
     days = {org.due_day}
     if settings.REMINDER_DAYS_BEFORE_DUE > 0:
         days.add(max(org.due_day - settings.REMINDER_DAYS_BEFORE_DUE, 1))
     if org.billing_cycle != BillingCycle.MONTHLY or today.day not in days:
+        return {"sent": 0}
+    if type(org).objects.filter(pk=org.pk, due_reminder_sent_on=today).exists():  # already ran today
         return {"sent": 0}
     month, year = current_period()
     sent = 0
@@ -158,11 +157,7 @@ def send_due_reminders(org) -> dict:
         customer__is_active=True, customer__is_free=False, customer__status=Status.ACTIVE,
     ).select_related("customer")
     for bill in unpaid:
-        message = render_message(
-            org, "reminder", month=month, amount=bill.due_amount, name=bill.customer.name
-        )
-        if SMSLog.objects.filter(customer=bill.customer, message=message, created_at__date=today).exists():
-            continue
         if send_org_sms(org, bill.customer, "reminder", month=month, amount=bill.due_amount):
             sent += 1
+    type(org).objects.filter(pk=org.pk).update(due_reminder_sent_on=today)
     return {"sent": sent}

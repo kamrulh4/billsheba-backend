@@ -114,6 +114,9 @@ TESTING = len(sys.argv) > 1 and sys.argv[1] == "test"
 SMS_URL: str = os.environ.get("SMS_URL", "https://bulksmsbd.net/api")
 SMS_API_KEY: str = os.environ.get("SMS_API_KEY", "")
 SMS_SENDER_ID: str = os.environ.get("SMS_SENDER_ID", "")
+# Keep one SMSLog row per message (history / debugging). Off by default: the monthly limit is counted on the
+# organization, so nothing depends on these rows. Tests keep it on to check what was sent.
+SMS_LOG_ENABLED: bool = os.environ.get("SMS_LOG_ENABLED", "true" if TESTING else "false").lower() == "true"
 if TESTING:
     SMS_API_KEY = ""
 # Application definition

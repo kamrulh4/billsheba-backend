@@ -129,6 +129,14 @@ class Organization(NameDescriptionBaseModel):
         default=10, help_text="Day of month after which unpaid customers are suspended."
     )
 
+    # SMS parts sent in ``sms_sent_month`` (first day of that month). This counter, not a log table, is what the
+    # monthly limit is checked against; it starts again from 0 when the month changes.
+    sms_sent_month = models.DateField(null=True, blank=True, editable=False)
+    sms_sent_count = models.PositiveIntegerField(default=0, editable=False)
+    # Once-a-day guards for the reminder jobs (so running a job twice in a day never double-sends).
+    expiry_reminder_sent_on = models.DateField(null=True, blank=True, editable=False)
+    due_reminder_sent_on = models.DateField(null=True, blank=True, editable=False)
+
     sms_quota_override = models.PositiveIntegerField(
         default=0, help_text="Monthly SMS limit for this ISP. 0 = use the plan's quota."
     )

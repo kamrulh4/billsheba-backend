@@ -2,12 +2,14 @@
 
 import logging
 
-from django.db.models import Sum
+from django.conf import settings
+from django.db.models import Case, F, IntegerField, Value, When
 from django.utils import timezone
 
 from common.bd import to_sms_number
 from common.helpers.sms_helper import SMS
 from common.sms_text import sms_segments
+from core.models import Organization
 from customer.choices import SMSStatus
 from customer.models import SMSLog
 from customer.utils import month_name_to_bangla
@@ -48,13 +50,35 @@ def render_message(org, kind: str, *, month: str = "", amount="", name: str = ""
         )
 
 
+def _month_start():
+    return timezone.localdate().replace(day=1)
+
+
 def sms_used(org) -> int:
-    """SMS parts this ISP has sent so far this month (what the monthly limit is counted in)."""
-    month_start = timezone.localtime().replace(day=1, hour=0, minute=0, second=0, microsecond=0)
-    total = SMSLog.objects.filter(
-        organization=org, billable=True, sms_status=SMSStatus.SENT, created_at__gte=month_start
-    ).aggregate(total=Sum("segments"))["total"]
-    return total or 0
+    """SMS parts this ISP has sent so far this month (what the monthly limit is counted in).
+
+    Read fresh from the database so a long-lived ``org`` object never reports a stale number.
+    """
+    row = Organization.objects.filter(pk=org.pk).values("sms_sent_month", "sms_sent_count").first()
+    if not row or row["sms_sent_month"] != _month_start():
+        return 0
+    return row["sms_sent_count"]
+
+
+def _count_sent(org, parts: int) -> None:
+    """Add ``parts`` to the ISP's count for this month, starting a new month at 0 (one atomic UPDATE)."""
+    month = _month_start()
+    Organization.objects.filter(pk=org.pk).update(
+        sms_sent_count=Case(
+            When(sms_sent_month=month, then=F("sms_sent_count") + parts), default=Value(parts), output_field=IntegerField()
+        ),
+        sms_sent_month=month,
+    )
+
+
+def _record(log: SMSLog) -> None:
+    if settings.SMS_LOG_ENABLED:
+        log.save()
 
 
 def sms_remaining(org) -> int:
@@ -72,19 +96,18 @@ def sample_message(org, template: str) -> str:
 
 
 def _deliver(org, customer, to: str, message: str, *, billable: bool = True) -> SMSLog:
-    """Send + log one message. Never raises; the log records SENT / FAILED / BLOCKED.
+    """Send one message. Never raises. Returns an ``SMSLog`` whose ``sms_status`` is SENT / FAILED / BLOCKED.
 
-    ``billable`` messages count against the ISP's monthly limit and are not sent (BLOCKED) once it is used up.
-    Platform notices (``billable=False``, or no organization) are never limited.
+    ``billable`` messages count against the ISP's monthly limit and are not sent (BLOCKED) once it is used up;
+    each one that goes out adds its parts to the ISP's counter. Platform notices (``billable=False``, or no
+    organization) are never limited or counted. The row is only saved when ``SMS_LOG_ENABLED``.
     """
     segments = sms_segments(message) or 1
     counted = billable and org is not None
-    log = SMSLog.objects.create(
-        organization=org, customer=customer, to=to, message=message, segments=segments, billable=counted
-    )
+    log = SMSLog(organization=org, customer=customer, to=to, message=message, segments=segments, billable=counted)
     if counted and sms_remaining(org) < segments:
         log.sms_status = SMSStatus.BLOCKED
-        log.save(update_fields=["sms_status"])
+        _record(log)
         logger.warning("SMS blocked: %s is over its monthly limit", org)
         return log
     try:
@@ -93,7 +116,9 @@ def _deliver(org, customer, to: str, message: str, *, billable: bool = True) -> 
         logger.exception("SMS send crashed")
         ok = False
     log.sms_status = SMSStatus.SENT if ok else SMSStatus.FAILED
-    log.save(update_fields=["sms_status"])
+    if ok and counted:
+        _count_sent(org, segments)
+    _record(log)
     return log
 
 
@@ -120,20 +145,23 @@ def deliver_bulk(org, items) -> dict:
     except Exception:
         logger.exception("Bulk SMS crashed")
         ok = False
-    SMSLog.objects.bulk_create(
-        [
-            SMSLog(
-                organization=org, customer=c, to=c.phone, message=m, segments=parts, billable=True,
-                sms_status=SMSStatus.SENT if ok else SMSStatus.FAILED,
-            )
-            for c, m, parts in chosen
-        ]
-    )
+    if ok:
+        _count_sent(org, used)
+    if settings.SMS_LOG_ENABLED:
+        SMSLog.objects.bulk_create(
+            [
+                SMSLog(
+                    organization=org, customer=c, to=c.phone, message=m, segments=parts, billable=True,
+                    sms_status=SMSStatus.SENT if ok else SMSStatus.FAILED,
+                )
+                for c, m, parts in chosen
+            ]
+        )
     return {"sent": [c for c, _, _ in chosen] if ok else [], "left": left, "failed": not ok}
 
 
 def send_org_sms(org, customer, kind: str, **ctx) -> SMSLog | None:
-    """Send one SMS if the org has SMS enabled; always records an ``SMSLog``."""
+    """Send one SMS if the org has SMS enabled (counted against its monthly limit)."""
     if not org.sms_feature or not customer or not customer.phone:
         return None
     message = render_message(org, kind, name=customer.name, **ctx)
