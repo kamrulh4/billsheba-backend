@@ -30,7 +30,7 @@ from core.permissions import (
     IsManager,
     IsStaff,
 )
-from customer.choices import ComplaintStatus, PaymentMethod, OnlinePaymentStatus, PaymentRequestStatus, SMSStatus
+from customer.choices import ComplaintStatus, OnlinePaymentStatus, PaymentRequestStatus, SMSStatus
 from customer.models import (
     Complaint,
     Customer,
@@ -114,7 +114,7 @@ def _date_param(request, name, default):
 
 
 class CollectionSummary(APIView):
-    """Per collector for a date range: cash collected, cash handed over, and what is still with them.
+    """Per collector for a date range: money a person took (any method, since a collector's bKash/Nagad number is their hand too), cash handed over, and what is still with them.
 
     Balance-based: ``pending = collected - deposited`` in the range, so pick the date you started tracking
     as ``start_date`` to carry earlier balances along. Staff only see their own line.
@@ -134,8 +134,7 @@ class CollectionSummary(APIView):
         collected_by = {
             r["entry_by_id"]: r
             for r in Payment.objects.filter(
-                organization_id=org_id, paid=True, amount__gt=0, payment_method=PaymentMethod.CASH,
-                entry_by__isnull=False, status=Status.ACTIVE,
+                organization_id=org_id, paid=True, amount__gt=0,                 entry_by__isnull=False, status=Status.ACTIVE,
                 payment_date__gte=day_start(start), payment_date__lt=day_start(end + timedelta(days=1)),
             ).values("entry_by_id").annotate(total=Sum("amount"), count=Count("id"))
         }

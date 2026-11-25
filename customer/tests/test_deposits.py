@@ -46,16 +46,17 @@ class DepositTests(Base):
         self.assertTrue(AuditLog.objects.filter(action="deposit.create").exists())
         self.assertEqual(Deposit.objects.get().received_by, self.admin)
 
-    def test_only_cash_that_a_person_collected_counts(self):
-        self.collect(self.rakib, 500, method="BKASH")
+    def test_everything_a_person_collected_counts_but_not_gateway_payments(self):
+        self.collect(self.rakib, 500, method="BKASH")  # sent to the collector's own number: his money
         self.collect(self.rakib, 400)
+        self.collect(self.rakib, 250, method="OTHER")  # e.g. imported history: still the collector's money
         Payment.objects.create(  # online payment: nobody's hand
             organization=self.org, customer=self.customer, bill_amount=100, amount=100, paid=True,
             payment_method="BKASH", entry_by=None, payment_date=timezone.now(),
         )
         res = self.client.get(SUMMARY)
         self.assertEqual(len(res.data["rows"]), 1)
-        self.assertEqual(self.row(res, self.rakib)["collected"], D("400"))
+        self.assertEqual(self.row(res, self.rakib)["collected"], D("1150"))
 
     def test_date_range_and_carry_over(self):
         last_month = timezone.now() - timedelta(days=40)
