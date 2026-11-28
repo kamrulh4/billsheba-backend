@@ -11,6 +11,7 @@ MIKROTIK_PASS = settings.MIKROTIK_PASS
 # set MIKROTIK_VERIFY_SSL=True when the router has a real certificate.
 MIKROTIK_VERIFY_SSL = getattr(settings, "MIKROTIK_VERIFY_SSL", False)
 REQUEST_TIMEOUT = getattr(settings, "MIKROTIK_REQUEST_TIMEOUT", 15)  # seconds
+USER_NOT_FOUND = "User not found in PPP secrets"
 
 
 class Mikrotik:
@@ -58,7 +59,7 @@ class Mikrotik:
 
             data = response.json()
             if not data:
-                return False, "User not found in PPP secrets"
+                return False, USER_NOT_FOUND
 
             return True, data[0]
 
@@ -411,6 +412,61 @@ class Mikrotik:
             return False, f"Network error: {str(e)}"
         except Exception as e:
             return False, f"Unexpected error: {str(e)}"
+
+    @staticmethod
+    def update_ppp_user(username, changes, organization=None):
+        """
+        Change fields (name / password / profile) of an existing PPP secret.
+        :return: tuple(found: bool, error: str | None). ``(False, None)`` means the router answered
+            and simply has no such user; ``error`` set means nothing was changed.
+        """
+        if not organization or not organization.router_configured:
+            return False, "Router configuration is not added yet"
+
+        ok, secret = Mikrotik.get_user_by_username(username, organization)
+        if not ok:
+            if secret == USER_NOT_FOUND:
+                return False, None
+            return False, str(secret)
+
+        try:
+            response = requests.patch(
+                f"{organization.get_router_ip()}/rest/ppp/secret/{secret['.id']}",
+                json=changes,
+                auth=(organization.get_router_username(), organization.get_router_password()),
+                verify=MIKROTIK_VERIFY_SSL,
+                timeout=REQUEST_TIMEOUT,
+            )
+            if response.status_code != 200:
+                try:
+                    body = response.json()
+                    error = body.get("detail") or body.get("message") or response.text
+                except Exception:
+                    error = response.text
+                return True, str(error)
+            return True, None
+
+        except requests.exceptions.Timeout:
+            return True, "Request timed out"
+        except requests.exceptions.RequestException as e:
+            return True, f"Network error: {str(e)}"
+        except Exception as e:
+            return True, f"Unexpected error: {str(e)}"
+
+    @staticmethod
+    def disconnect_ppp_user(username, organization):
+        """
+        Drop the user's live session so the router applies the new settings when it reconnects.
+        :return: "done", "offline" (nothing to drop) or "failed"
+        """
+        ok, sessions = Mikrotik.get_user_sessions(organization)
+        if not ok:
+            return "failed"
+        mine = [s for s in sessions if s.get("name") == username]
+        if not mine:
+            return "offline"
+        dropped = [Mikrotik.delete_user_session(s[".id"], organization) for s in mine]
+        return "done" if all(dropped) else "failed"
 
     @staticmethod
     def delete_ppp_user(username, organization=None):

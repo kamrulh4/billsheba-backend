@@ -109,6 +109,19 @@ class CustomerDetail(RetrieveUpdateDestroyAPIView):
     def get_queryset(self):
         return org_customers(self.request.user).select_related("package", "organization")
 
+    def perform_update(self, serializer):
+        customer = serializer.save()
+        result = getattr(serializer, "router_result", None)
+        if result:
+            # which fields, never their values (the password is among them)
+            renamed = (
+                f"{serializer.old_username} -> {customer.username}; "
+                if serializer.old_username != customer.username
+                else ""
+            )
+            audit(self.request, "customer.router_update", f"customer:{customer.pk}",
+                  f"{renamed}{result['status']}: {', '.join(result['changed'])}")
+
     def delete(self, request, *args, **kwargs):
         """Soft delete: payment history must survive for accounting."""
         instance = self.get_object()

@@ -6,6 +6,7 @@ from common.choices import Status
 from customer.helpers import Mikrotik
 from customer.models import Customer, Package
 from customer.serializers.package import PackageBase
+from customer.services.router_sync import RouterSyncError, push_customer_changes
 
 
 class CustomerBase(serializers.ModelSerializer):
@@ -166,9 +167,7 @@ class CustomerDetailSerializer(CustomerBase):
             "description",
             "created_at",
         )
-        # The username is the router identity; renaming it here would orphan the PPP secret.
         read_only_fields = CustomerBase.Meta.read_only_fields + (
-            "username",
             "mikrotik_synced",
             "connection_start_date",
             "created_at",
@@ -180,12 +179,37 @@ class CustomerDetailSerializer(CustomerBase):
             raise serializers.ValidationError("This phone number is already in use.")
         return value
 
+    def validate_username(self, value):
+        value = (value or "").strip()
+        if value == self.instance.username:
+            return value  # unchanged: never block an edit over what is already stored
+        if not value:
+            raise serializers.ValidationError("Username is required.")
+        if self._scoped().filter(username=value).exclude(pk=self.instance.pk).exists():
+            raise serializers.ValidationError("This username is already in use.")
+        return value
+
     def update(self, instance, validated_data):
         package_id = validated_data.pop("package_id", None)
         if package_id is not None:
             validated_data["package"] = self._package_for_org(package_id)
         validated_data["updated_by_id"] = self.context["request"].user.id
-        return super().update(instance, validated_data)
+        old_username = instance.username
+        # the router first: if it refuses, nothing is saved here either
+        try:
+            self.router_result = push_customer_changes(instance, validated_data)
+        except RouterSyncError as e:
+            raise serializers.ValidationError({"message": f"Router: {e}"})
+        instance = super().update(instance, validated_data)
+        self.old_username = old_username
+        return instance
+
+    def to_representation(self, instance):
+        data = super().to_representation(instance)
+        # only on the answer to an edit that had something to tell the router
+        if getattr(self, "router_result", None):
+            data["router"] = self.router_result
+        return data
 
 
 class StatusToggleSerializer(serializers.Serializer):
