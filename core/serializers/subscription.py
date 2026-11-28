@@ -18,9 +18,16 @@ class SubscriptionBase(serializers.ModelSerializer):
             "duration_days",
             "trial_days",
             "sms_feature",
+            "sms_monthly_quota",
+            "is_public",
             "features",
         )
         read_only_fields = ("id", "uid")
+        extra_kwargs = {
+            "price": {"min_value": 0},
+            "max_customers": {"min_value": 1},
+            "max_users": {"min_value": 1},
+        }
 
 
 class SubscriptionListSerializer(SubscriptionBase):

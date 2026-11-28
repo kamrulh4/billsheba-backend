@@ -1,9 +1,11 @@
+from django.db import transaction
 from rest_framework.generics import (
     ListCreateAPIView,
     RetrieveUpdateDestroyAPIView,
 )
 
-from core.models import Subscription
+from core.audit import audit
+from core.models import Organization, Subscription
 from core.permissions import IsSuperAdminOrReadOnly
 from core.serializers.subscription import (
     SubscriptionDetailSerializer,
@@ -30,3 +32,17 @@ class SubscriptionDetail(RetrieveUpdateDestroyAPIView):
     serializer_class = SubscriptionDetailSerializer
     lookup_field = "uid"
     permission_classes = [IsSuperAdminOrReadOnly]
+
+    @transaction.atomic
+    def perform_update(self, serializer):
+        old_limit = serializer.instance.max_customers
+        plan = serializer.save()
+        # Each ISP keeps its own copy of the customer limit. Move the ones still on the plan's old
+        # number along with it; an ISP that was given a limit of its own keeps that.
+        if plan.max_customers != old_limit:
+            Organization.objects.filter(subscription=plan, allowed_customer=old_limit).update(
+                allowed_customer=plan.max_customers
+            )
+        # field names and the new values: plans hold no secrets, and a price change should be traceable
+        changes = ", ".join(f"{k}={v}" for k, v in sorted(serializer.validated_data.items()))
+        audit(self.request, "plan.update", f"plan:{plan.pk} {plan.name}", changes)
